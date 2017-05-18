@@ -18,6 +18,7 @@
 package tidb
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -365,6 +366,7 @@ func (s *session) retry(maxCnt int, infoSchemaChanged bool) error {
 			if infoSchemaChanged {
 				st, err = updateStatement(st, s, txt)
 				if err != nil {
+					log.Warn(collectRetryFailInfo(nh.history[:i]))
 					return errors.Trace(err)
 				}
 			}
@@ -380,12 +382,14 @@ func (s *session) retry(maxCnt int, infoSchemaChanged bool) error {
 			s.sessionVars.StmtCtx.ResetForRetry()
 			_, err = st.Exec(s)
 			if err != nil {
+				log.Warn(collectRetryFailInfo(nh.history))
 				break
 			}
 		}
 		if err == nil {
 			err = s.doCommit()
 			if err == nil {
+				log.Warn(collectRetryFailInfo(nh.history))
 				break
 			}
 		}
@@ -403,6 +407,15 @@ func (s *session) retry(maxCnt int, infoSchemaChanged bool) error {
 		kv.BackOff(retryCnt)
 	}
 	return err
+}
+
+func collectRetryFailInfo(records []*stmtRecord) string {
+	var buf bytes.Buffer
+	for _, r := range records {
+		txt := r.st.OriginText()
+		fmt.Fprintf(&buf, "%s;", txt)
+	}
+	return buf.String()
 }
 
 func updateStatement(st ast.Statement, s *session, txt string) (ast.Statement, error) {
